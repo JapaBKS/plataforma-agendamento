@@ -107,7 +107,7 @@ export default async function CalendarPage({
         </p>
       ) : (
         <GroupCalendarClient
-          date={date}
+          date={date.toISOString()}
           columns={columns}
           servicesByProfessional={servicesByProfessional}
           professionalLabel={labels.professional}
