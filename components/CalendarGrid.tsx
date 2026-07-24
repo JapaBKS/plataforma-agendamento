@@ -1,3 +1,5 @@
+"use client";
+
 import { format } from "date-fns";
 
 export interface CalendarAppointment {
@@ -27,6 +29,11 @@ const STATUS_STYLE: Record<string, { bg: string; border: string }> = {
  * Grade de calendário de um dia. `startHour`/`endHour` definem o intervalo visível
  * (ex: 7 às 20h). Cada `CalendarColumn` vira uma coluna - use uma coluna só pra
  * agenda individual, ou uma por profissional pra visão em grupo.
+ *
+ * Interativo: clicar num espaço vazio dispara `onSlotClick` (pra criar um
+ * agendamento naquele horário); clicar num agendamento existente dispara
+ * `onAppointmentClick` (pra ver detalhes/cancelar). Ambos são opcionais -
+ * sem eles, o calendário funciona só como visualização.
  */
 export function CalendarGrid({
   date,
@@ -34,12 +41,16 @@ export function CalendarGrid({
   endHour = 20,
   slotMinutes = 15,
   columns,
+  onSlotClick,
+  onAppointmentClick,
 }: {
   date: Date;
   startHour?: number;
   endHour?: number;
   slotMinutes?: number;
   columns: CalendarColumn[];
+  onSlotClick?: (columnId: string, start: Date) => void;
+  onAppointmentClick?: (appointment: CalendarAppointment, columnId: string) => void;
 }) {
   const totalSlots = ((endHour - startHour) * 60) / slotMinutes;
   const hourLines = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i);
@@ -48,6 +59,14 @@ export function CalendarGrid({
     const d = new Date(iso);
     const minutesFromStart = (d.getHours() - startHour) * 60 + d.getMinutes();
     return Math.round(minutesFromStart / slotMinutes);
+  }
+
+  function dateForSlot(slotIdx: number) {
+    const d = new Date(date);
+    const totalMinutes = startHour * 60 + slotIdx * slotMinutes;
+    d.setHours(0, 0, 0, 0);
+    d.setMinutes(totalMinutes);
+    return d;
   }
 
   return (
@@ -79,7 +98,7 @@ export function CalendarGrid({
           gridTemplateRows: `repeat(${totalSlots}, 22px)`,
         }}
       >
-        {/* Linhas de hora (rótulos + divisórias horizontais) */}
+        {/* Linhas de hora (rótulos) */}
         {hourLines.map((h, i) => (
           <div
             key={h}
@@ -93,34 +112,55 @@ export function CalendarGrid({
             {String(h).padStart(2, "0")}:00
           </div>
         ))}
-        {columns.map((_, colIdx) =>
-          hourLines.map((h, i) => (
-            <div
-              key={`${colIdx}-${h}`}
-              style={{
-                gridColumn: colIdx + 2,
-                gridRow: `${(i * 60) / slotMinutes + 1} / span 1`,
-                borderTop: "1px solid var(--line)",
-              }}
-            />
-          ))
+
+        {/* Camada clicável: uma célula por slot (ex: 15min) em cada coluna - é
+            aqui que o clique pra CRIAR um agendamento acontece */}
+        {columns.map((col, colIdx) =>
+          Array.from({ length: totalSlots }, (_, slotIdx) => {
+            const isHourLine = (slotIdx * slotMinutes) % 60 === 0;
+            return (
+              <button
+                key={`${col.id}-${slotIdx}`}
+                type="button"
+                onClick={() => onSlotClick?.(col.id, dateForSlot(slotIdx))}
+                className="text-left"
+                style={{
+                  gridColumn: colIdx + 2,
+                  gridRow: `${slotIdx + 1} / span 1`,
+                  borderTop: isHourLine ? "1px solid var(--line)" : "1px solid transparent",
+                  cursor: onSlotClick ? "pointer" : "default",
+                  background: "transparent",
+                }}
+                onMouseEnter={(e) => {
+                  if (onSlotClick) e.currentTarget.style.background = "color-mix(in srgb, var(--teal) 8%, transparent)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
+                aria-label={`Novo horário às ${format(dateForSlot(slotIdx), "HH:mm")}`}
+              />
+            );
+          })
         )}
 
-        {/* Agendamentos */}
+        {/* Agendamentos (renderizados por cima da camada clicável) */}
         {columns.map((col, colIdx) =>
           col.appointments.map((a) => {
             const start = slotIndexFor(a.startAt);
             const end = Math.max(slotIndexFor(a.endAt), start + 1);
             const style = STATUS_STYLE[a.status] ?? STATUS_STYLE.SCHEDULED;
             return (
-              <div
+              <button
                 key={a.id}
-                className="rounded-md px-2 py-1 overflow-hidden mx-0.5 my-px"
+                type="button"
+                onClick={() => onAppointmentClick?.(a, col.id)}
+                className="rounded-md px-2 py-1 overflow-hidden mx-0.5 my-px text-left"
                 style={{
                   gridColumn: colIdx + 2,
                   gridRow: `${start + 1} / ${end + 1}`,
                   background: style.bg,
                   borderLeft: `3px solid ${style.border}`,
+                  cursor: onAppointmentClick ? "pointer" : "default",
                 }}
                 title={`${a.patientName} · ${format(new Date(a.startAt), "HH:mm")}–${format(new Date(a.endAt), "HH:mm")}`}
               >
@@ -130,7 +170,7 @@ export function CalendarGrid({
                 <p className="text-[10px] truncate" style={{ color: "var(--ink-soft)" }}>
                   {format(new Date(a.startAt), "HH:mm")}
                 </p>
-              </div>
+              </button>
             );
           })
         )}
