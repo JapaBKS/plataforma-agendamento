@@ -13,7 +13,7 @@ export function ProfessionalCalendarClient({
   services,
   patientLabel,
 }: {
-  date: Date;
+  date: string; // ISO
   professionalId: string;
   professionalLabel: string;
   columns: CalendarColumn[];
@@ -33,8 +33,8 @@ export function ProfessionalCalendarClient({
   return (
     <>
       <CalendarGrid
-        date={date}
         columns={columns}
+        columnDates={[new Date(date)]}
         onSlotClick={(_, start) => setNewSlotStart(start)}
         onAppointmentClick={(appointment) => setSelected(appointment)}
       />
