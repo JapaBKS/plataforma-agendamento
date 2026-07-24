@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getLabels } from "@/lib/labels";
-import { CalendarGrid } from "@/components/CalendarGrid";
 import { startOfDay, endOfDay, addDays, subDays, format } from "date-fns";
 import { DatePicker } from "./DatePicker";
+import { GroupCalendarClient } from "./GroupCalendarClient";
 
 export default async function CalendarPage({
   searchParams,
@@ -34,6 +34,7 @@ export default async function CalendarPage({
           where: { startAt: { gte: dayStart, lte: dayEnd }, status: { not: "CANCELLED" } },
           orderBy: { startAt: "asc" },
         },
+        services: { where: { service: { active: true } }, include: { service: true } },
       },
       orderBy: { createdAt: "asc" },
     }),
@@ -54,6 +55,18 @@ export default async function CalendarPage({
       status: a.status,
     })),
   }));
+
+  const servicesByProfessional = Object.fromEntries(
+    professionals.map((p) => [
+      p.id,
+      p.services.map((link) => ({
+        serviceId: link.service.id,
+        name: link.service.name,
+        durationMin: link.durationMin ?? link.service.defaultDurationMin,
+        price: link.price ?? link.service.price,
+      })),
+    ])
+  );
 
   return (
     <main className="flex-1 px-6 py-8 max-w-6xl mx-auto w-full" style={{ background: "var(--surface)" }}>
@@ -93,7 +106,13 @@ export default async function CalendarPage({
           Nenhum {labels.professional.toLowerCase()} cadastrado ainda.
         </p>
       ) : (
-        <CalendarGrid date={date} columns={columns} />
+        <GroupCalendarClient
+          date={date}
+          columns={columns}
+          servicesByProfessional={servicesByProfessional}
+          professionalLabel={labels.professional}
+          patientLabel={labels.patient}
+        />
       )}
     </main>
   );
