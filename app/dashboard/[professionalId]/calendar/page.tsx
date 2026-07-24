@@ -2,9 +2,10 @@ import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { auth, canAccessProfessional } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { CalendarGrid } from "@/components/CalendarGrid";
+import { getLabels } from "@/lib/labels";
 import { startOfDay, endOfDay, addDays, subDays, format } from "date-fns";
 import { DatePicker } from "../../calendar/DatePicker";
+import { ProfessionalCalendarClient } from "./ProfessionalCalendarClient";
 
 export default async function ProfessionalCalendarPage({
   params,
@@ -21,7 +22,7 @@ export default async function ProfessionalCalendarPage({
 
   const professional = await prisma.professional.findUnique({
     where: { id: professionalId },
-    include: { user: true },
+    include: { user: true, tenant: true },
   });
   if (!professional) notFound();
 
@@ -29,16 +30,24 @@ export default async function ProfessionalCalendarPage({
     redirect("/dashboard");
   }
 
+  const labels = getLabels(professional.tenant.businessType, professional.tenant.customLabels);
+
   const { date: dateParam } = await searchParams;
   const date = dateParam ? new Date(`${dateParam}T00:00:00`) : new Date();
   const dayStart = startOfDay(date);
   const dayEnd = endOfDay(date);
   const dateValue = format(date, "yyyy-MM-dd");
 
-  const appointments = await prisma.appointment.findMany({
-    where: { professionalId, startAt: { gte: dayStart, lte: dayEnd }, status: { not: "CANCELLED" } },
-    orderBy: { startAt: "asc" },
-  });
+  const [appointments, professionalServices] = await Promise.all([
+    prisma.appointment.findMany({
+      where: { professionalId, startAt: { gte: dayStart, lte: dayEnd }, status: { not: "CANCELLED" } },
+      orderBy: { startAt: "asc" },
+    }),
+    prisma.professionalService.findMany({
+      where: { professionalId, service: { active: true } },
+      include: { service: true },
+    }),
+  ]);
 
   const columns = [
     {
@@ -54,6 +63,13 @@ export default async function ProfessionalCalendarPage({
       })),
     },
   ];
+
+  const services = professionalServices.map((link) => ({
+    serviceId: link.service.id,
+    name: link.service.name,
+    durationMin: link.durationMin ?? link.service.defaultDurationMin,
+    price: link.price ?? link.service.price,
+  }));
 
   return (
     <main className="flex-1 px-6 py-8 max-w-3xl mx-auto w-full" style={{ background: "var(--surface)" }}>
@@ -88,7 +104,14 @@ export default async function ProfessionalCalendarPage({
         {format(date, "EEEE, dd/MM/yyyy")}
       </p>
 
-      <CalendarGrid date={date} columns={columns} />
+      <ProfessionalCalendarClient
+        date={date}
+        professionalId={professionalId}
+        professionalLabel={professional.user.name}
+        columns={columns}
+        services={services}
+        patientLabel={labels.patient}
+      />
     </main>
   );
 }
