@@ -12,7 +12,7 @@ export function GroupCalendarClient({
   professionalLabel,
   patientLabel,
 }: {
-  date: Date;
+  date: string; // ISO
   columns: CalendarColumn[];
   servicesByProfessional: Record<string, ServiceOption[]>;
   professionalLabel: string;
@@ -20,7 +20,7 @@ export function GroupCalendarClient({
 }) {
   const router = useRouter();
   const [newSlot, setNewSlot] = useState<{ professionalId: string; start: Date } | null>(null);
-  const [selected, setSelected] = useState<{ appointment: CalendarAppointment; professionalId: string } | null>(null);
+  const [selected, setSelected] = useState<CalendarAppointment | null>(null);
 
   function refresh() {
     setNewSlot(null);
@@ -33,10 +33,10 @@ export function GroupCalendarClient({
   return (
     <>
       <CalendarGrid
-        date={date}
         columns={columns}
+        columnDates={columns.map(() => new Date(date))}
         onSlotClick={(professionalId, start) => setNewSlot({ professionalId, start })}
-        onAppointmentClick={(appointment, professionalId) => setSelected({ appointment, professionalId })}
+        onAppointmentClick={(appointment) => setSelected(appointment)}
       />
 
       {newSlot && selectedColumn && (
@@ -52,11 +52,7 @@ export function GroupCalendarClient({
       )}
 
       {selected && (
-        <AppointmentDetailModal
-          appointment={selected.appointment}
-          onClose={() => setSelected(null)}
-          onChanged={refresh}
-        />
+        <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)} onChanged={refresh} />
       )}
     </>
   );
