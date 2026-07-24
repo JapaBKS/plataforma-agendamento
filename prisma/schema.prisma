@@ -1,0 +1,276 @@
+// Schema do banco de dados - Plataforma de Agendamentos (multi-tenant)
+// Rode `npx prisma generate` e `npx prisma migrate dev` após configurar o DATABASE_URL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// TENANT (cada cliente que você vende a plataforma: uma barbearia, uma clínica...)
+// ---------------------------------------------------------------------------
+
+enum BusinessType {
+  BARBEARIA
+  CLINICA
+  ESTETICA
+  OUTRO
+}
+
+enum Plan {
+  BASICO
+  PRO
+  ENTERPRISE
+}
+
+model Tenant {
+  id           String       @id @default(cuid())
+  name         String       // Ex: "Barbearia do Zé"
+  slug         String       @unique // usado em URLs/relatórios, ex: "barbearia-do-ze"
+  businessType BusinessType @default(OUTRO)
+  plan         Plan         @default(BASICO)
+
+  // Branding simples
+  logoUrl      String?
+  primaryColor String       @default("#1F6F63")
+
+  // Rótulos customizados que sobrescrevem os padrões do businessType.
+  // Ex: {"professional": "Barbeiro", "appointment": "Corte", "patient": "Cliente"}
+  customLabels Json?
+
+  // Configurações livres específicas do tipo de negócio (ex: aceita convênio, comissão padrão etc.)
+  settings     Json?
+
+  active       Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  users            User[]
+  professionals    Professional[]
+  appointments     Appointment[]
+  apiKeys          ApiKey[]
+  services         Service[]
+}
+
+// ---------------------------------------------------------------------------
+// USUÁRIOS E CONTROLE DE ACESSO
+// ---------------------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN  // Você (dono da plataforma) - gerencia todos os tenants, sem tenantId
+  ADMIN        // Secretária/Admin: acessa e gerencia todas as agendas do seu tenant
+  PROFESSIONAL // Profissional: acessa apenas a própria agenda
+}
+
+model User {
+  id            String    @id @default(cuid())
+  tenantId      String?
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name          String
+  email         String
+  passwordHash  String
+  role          Role      @default(PROFESSIONAL)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Se o usuário for um profissional, ele tem um perfil de Professional vinculado
+  professional  Professional?
+
+  sessions      Session[]
+
+  // O email só precisa ser único DENTRO do tenant, não globalmente -
+  // isso permite que "joao@gmail.com" exista em dois tenants diferentes.
+  @@unique([tenantId, email])
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+}
+
+// ---------------------------------------------------------------------------
+// PROFISSIONAIS E AGENDAS
+// ---------------------------------------------------------------------------
+
+model Professional {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  specialty     String?   // Ex: "Cardiologista" na clínica, "Barba e cabelo" na barbearia
+  color         String    @default("#4F46E5") // cor de identificação na agenda (UI)
+  active        Boolean   @default(true)
+
+  // Campos livres específicos do negócio (ex: {"comissaoPercentual": 40} numa barbearia,
+  // {"crm": "12345-PR"} numa clínica)
+  customFields  Json?
+
+  appointments  Appointment[]
+  availability  AvailabilitySlot[]
+  blocks        ScheduleBlock[]
+  services      ProfessionalService[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([tenantId])
+}
+
+// Horários de trabalho recorrentes (ex.: Seg-Sex 08h-18h)
+model AvailabilitySlot {
+  id             String       @id @default(cuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  weekday        Int          // 0 = domingo ... 6 = sábado
+  startTime      String       // "08:00"
+  endTime        String       // "18:00"
+
+  // De quanto em quanto tempo o sistema sugere um horário de início possível
+  // (ex: 15min = sugere 09:00, 09:15, 09:30...). NÃO é a duração do atendimento -
+  // essa vem do Service escolhido. Ver lib/availability.ts.
+  stepMinutes    Int          @default(15)
+
+  @@index([professionalId, weekday])
+}
+
+// Bloqueios pontuais (férias, folga, feriado específico do profissional)
+model ScheduleBlock {
+  id             String       @id @default(cuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  startAt        DateTime
+  endAt          DateTime
+  reason         String?
+
+  @@index([professionalId, startAt, endAt])
+}
+
+// ---------------------------------------------------------------------------
+// SERVIÇOS/PROCEDIMENTOS (cada um com sua própria duração)
+// ---------------------------------------------------------------------------
+
+// Catálogo de serviços do tenant. Ex: "Corte" 30min, "Corte + barba" 60min,
+// "Consulta de retorno" 15min, "Avaliação inicial" 60min.
+model Service {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name               String
+  defaultDurationMin Int      // duração padrão em minutos
+  price              Float?
+  active             Boolean  @default(true)
+
+  professionals      ProfessionalService[]
+  appointments       Appointment[]
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// Liga um profissional a um serviço que ele executa. Permite sobrescrever a
+// duração/preço padrão do serviço - ex: "Corte + barba" é 60min no catálogo,
+// mas com o Zé Carlos (mais rápido) só leva 45min.
+model ProfessionalService {
+  id             String       @id @default(cuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  serviceId      String
+  service        Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  durationMin    Int?         // sobrescreve Service.defaultDurationMin quando definido
+  price          Float?       // sobrescreve Service.price quando definido
+
+  @@unique([professionalId, serviceId])
+  @@index([professionalId])
+}
+
+// ---------------------------------------------------------------------------
+// AGENDAMENTOS
+// ---------------------------------------------------------------------------
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   Professional      @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  // O serviço define a duração do agendamento. Fica opcional pra não quebrar
+  // agendamentos manuais sem um serviço específico selecionado.
+  serviceId      String?
+  service        Service?          @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  patientName    String            // "cliente"/"paciente" - nome genérico, rótulo muda na UI
+  patientPhone   String?
+  patientEmail   String?
+
+  startAt        DateTime
+  endAt          DateTime
+  status         AppointmentStatus @default(SCHEDULED)
+  notes          String?
+
+  // Preço "congelado" no momento da criação (cópia do preço do serviço/profissional
+  // NAQUELE momento) - se o preço do catálogo mudar depois, agendamentos antigos e
+  // relatórios financeiros continuam corretos com o valor que valia na hora.
+  price          Float?
+
+  // Campos livres específicos do negócio (ex: {"convenio": "Unimed"} na clínica,
+  // {"servico": "Corte + Barba", "valor": 60} na barbearia)
+  customFields   Json?
+
+  // Preenchido quando o agendamento/cancelamento vem de uma automação N8N
+  source         String            @default("manual") // "manual" | "n8n" | "public_form"
+  externalRef    String?           // id externo (ex: id da conversa no WhatsApp)
+
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  cancelledAt    DateTime?
+  cancelReason   String?
+
+  @@index([tenantId])
+  @@index([professionalId, startAt])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// CHAVES DE API (para integração N8N e outras automações) - uma por tenant
+// ---------------------------------------------------------------------------
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String    // ex: "n8n-producao"
+  keyHash     String    @unique
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([tenantId])
+}
