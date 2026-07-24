@@ -18,7 +18,7 @@ export function WeekCalendarClient({
   patientLabel,
 }: {
   columns: CalendarColumn[];
-  columnDates: string[]; // ISO - Server Components não passam Date direto pra client
+  columnDates: string[]; // ISO
   professionals: ProfessionalOption[];
   servicesByProfessional: Record<string, ServiceOption[]>;
   patientLabel: string;
