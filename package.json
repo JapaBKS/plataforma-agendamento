@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "TZ=America/Sao_Paulo next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "TZ=America/Sao_Paulo next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:seed": "tsx prisma/seed.ts"
