@@ -38,7 +38,7 @@ export default async function ProfessionalCalendarPage({
   const dayEnd = endOfDay(date);
   const dateValue = format(date, "yyyy-MM-dd");
 
-  const [appointments, professionalServices] = await Promise.all([
+  const [appointments, professionalServices, availability] = await Promise.all([
     prisma.appointment.findMany({
       where: { professionalId, startAt: { gte: dayStart, lte: dayEnd }, status: { not: "CANCELLED" } },
       orderBy: { startAt: "asc" },
@@ -47,13 +47,20 @@ export default async function ProfessionalCalendarPage({
       where: { professionalId, service: { active: true } },
       include: { service: true },
     }),
+    // Grade de trabalho do dia da semana correspondente
+    prisma.availabilitySlot.findMany({
+      where: { professionalId, weekday: date.getDay() },
+    }),
   ]);
+
+  const workingRanges = availability.map((slot) => ({ start: slot.startTime, end: slot.endTime }));
 
   const columns = [
     {
       id: professional.id,
       label: professional.user.name,
       color: professional.color,
+      workingRanges,
       appointments: appointments.map((a) => ({
         id: a.id,
         patientName: a.patientName,
@@ -101,7 +108,8 @@ export default async function ProfessionalCalendarPage({
       </div>
 
       <p className="text-sm mb-4" style={{ color: "var(--ink-soft)" }}>
-        {format(date, "EEEE, dd/MM/yyyy")}
+        {format(date, "dd/MM/yyyy")}
+        {workingRanges.length === 0 && " · sem expediente cadastrado neste dia"}
       </p>
 
       <ProfessionalCalendarClient
@@ -110,6 +118,7 @@ export default async function ProfessionalCalendarPage({
         professionalLabel={professional.user.name}
         columns={columns}
         services={services}
+        workingRanges={workingRanges}
         patientLabel={labels.patient}
       />
     </main>
