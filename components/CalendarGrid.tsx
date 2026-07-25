@@ -12,6 +12,12 @@ export interface CalendarAppointment {
   accentColor?: string;
 }
 
+/** Faixa de expediente, em "HH:mm" */
+export interface WorkingRange {
+  start: string;
+  end: string;
+}
+
 export interface CalendarColumn {
   id: string;
   label: string;
@@ -19,6 +25,8 @@ export interface CalendarColumn {
   color: string;
   isToday?: boolean;
   appointments: CalendarAppointment[];
+  /** undefined = sem restrição (tudo liberado); [] = fechado nesse dia */
+  workingRanges?: WorkingRange[];
 }
 
 const STATUS_STYLE: Record<string, { bg: string; border: string }> = {
@@ -28,6 +36,25 @@ const STATUS_STYLE: Record<string, { bg: string; border: string }> = {
   CANCELLED: { bg: "color-mix(in srgb, var(--amber) 12%, white)", border: "var(--amber)" },
   NO_SHOW: { bg: "color-mix(in srgb, var(--amber) 12%, white)", border: "var(--amber)" },
 };
+
+function toMinutes(hhmm: string) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * Calcula a faixa de horas que vale a pena exibir a partir dos expedientes
+ * informados - evita mostrar um monte de horário morto fora do funcionamento.
+ */
+export function computeHourRange(ranges: WorkingRange[], fallback = { start: 8, end: 18 }) {
+  if (!ranges.length) return fallback;
+  const minStart = Math.min(...ranges.map((r) => toMinutes(r.start)));
+  const maxEnd = Math.max(...ranges.map((r) => toMinutes(r.end)));
+  return {
+    start: Math.floor(minStart / 60),
+    end: Math.ceil(maxEnd / 60),
+  };
+}
 
 export function CalendarGrid({
   startHour = 7,
@@ -61,6 +88,14 @@ export function CalendarGrid({
     d.setHours(0, 0, 0, 0);
     d.setMinutes(totalMinutes);
     return d;
+  }
+
+  /** O slot cai dentro do expediente daquela coluna? */
+  function isWorkingSlot(col: CalendarColumn, slotIdx: number) {
+    if (col.workingRanges === undefined) return true; // sem config = libera
+    const slotStart = startHour * 60 + slotIdx * slotMinutes;
+    const slotEnd = slotStart + slotMinutes;
+    return col.workingRanges.some((r) => slotStart >= toMinutes(r.start) && slotEnd <= toMinutes(r.end));
   }
 
   const gridCols = `56px repeat(${columns.length}, minmax(0, 1fr))`;
@@ -119,25 +154,34 @@ export function CalendarGrid({
         {columns.map((col, colIdx) =>
           Array.from({ length: totalSlots }, (_, slotIdx) => {
             const isHourLine = (slotIdx * slotMinutes) % 60 === 0;
+            const working = isWorkingSlot(col, slotIdx);
+            const clickable = working && !!onSlotClick;
             return (
               <button
                 key={`${col.id}-${slotIdx}`}
                 type="button"
-                onClick={() => onSlotClick?.(col.id, dateForSlot(colIdx, slotIdx))}
+                disabled={!clickable}
+                onClick={() => clickable && onSlotClick!(col.id, dateForSlot(colIdx, slotIdx))}
                 style={{
                   gridColumn: colIdx + 2,
                   gridRow: `${slotIdx + 1} / span 1`,
                   borderTop: isHourLine ? "1px solid var(--line)" : "1px solid transparent",
-                  cursor: onSlotClick ? "pointer" : "default",
-                  background: "transparent",
+                  cursor: clickable ? "pointer" : "default",
+                  background: working ? "transparent" : "color-mix(in srgb, var(--ink) 5%, transparent)",
                 }}
                 onMouseEnter={(e) => {
-                  if (onSlotClick) e.currentTarget.style.background = "color-mix(in srgb, var(--teal) 8%, transparent)";
+                  if (clickable) e.currentTarget.style.background = "color-mix(in srgb, var(--teal) 8%, transparent)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.background = working
+                    ? "transparent"
+                    : "color-mix(in srgb, var(--ink) 5%, transparent)";
                 }}
-                aria-label={`Novo horário às ${format(dateForSlot(colIdx, slotIdx), "dd/MM HH:mm")}`}
+                aria-label={
+                  working
+                    ? `Novo horário às ${format(dateForSlot(colIdx, slotIdx), "dd/MM HH:mm")}`
+                    : "Fora do horário de funcionamento"
+                }
               />
             );
           })
