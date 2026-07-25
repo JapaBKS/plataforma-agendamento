@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarGrid, CalendarColumn, CalendarAppointment } from "@/components/CalendarGrid";
+import { CalendarGrid, CalendarColumn, CalendarAppointment, WorkingRange, computeHourRange } from "@/components/CalendarGrid";
 import { QuickCreateModal, AppointmentDetailModal, ServiceOption } from "@/components/AppointmentModals";
 
 export function ProfessionalCalendarClient({
@@ -11,6 +11,7 @@ export function ProfessionalCalendarClient({
   professionalLabel,
   columns,
   services,
+  workingRanges,
   patientLabel,
 }: {
   date: string; // ISO
@@ -18,6 +19,7 @@ export function ProfessionalCalendarClient({
   professionalLabel: string;
   columns: CalendarColumn[];
   services: ServiceOption[];
+  workingRanges: WorkingRange[];
   patientLabel: string;
 }) {
   const router = useRouter();
@@ -30,11 +32,18 @@ export function ProfessionalCalendarClient({
     router.refresh();
   }
 
+  // Mostra só a faixa de horas que importa (com uma folga de 1h de cada lado)
+  const range = computeHourRange(workingRanges);
+  const startHour = Math.max(0, range.start - 1);
+  const endHour = Math.min(24, range.end + 1);
+
   return (
     <>
       <CalendarGrid
         columns={columns}
         columnDates={[new Date(date)]}
+        startHour={startHour}
+        endHour={endHour}
         onSlotClick={(_, start) => setNewSlotStart(start)}
         onAppointmentClick={(appointment) => setSelected(appointment)}
       />
