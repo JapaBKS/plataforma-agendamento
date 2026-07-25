@@ -113,7 +113,7 @@ export default async function ProfessionalCalendarPage({
       </p>
 
       <ProfessionalCalendarClient
-        date={date.toISOString()}
+        date={dateValue}
         professionalId={professionalId}
         professionalLabel={professional.user.name}
         columns={columns}
