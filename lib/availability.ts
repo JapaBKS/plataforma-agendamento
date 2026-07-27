@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { addMinutes, startOfDay, endOfDay } from "date-fns";
+import { addMinutes } from "date-fns";
+import {
+  dateToYmdBrazil,
+  startOfDayBrazil,
+  endOfDayBrazil,
+  brazilWallClockToUtc,
+} from "@/lib/timezone";
 
 export interface TimeWindow {
   start: Date;
@@ -19,9 +25,13 @@ export async function getFreeWindows(
   date: Date,
   tenantId?: string
 ): Promise<TimeWindow[]> {
-  const weekday = date.getDay();
-  const dayStart = startOfDay(date);
-  const dayEnd = endOfDay(date);
+  // TUDO calculado no fuso do Brasil. Sem isso, num servidor UTC (Vercel) o
+  // expediente "08:00-18:00" viraria 08:00-18:00 UTC = 05:00-15:00 no Brasil,
+  // e qualquer atendimento após as 15h seria recusado como "fora do expediente".
+  const ymd = dateToYmdBrazil(date);
+  const weekday = new Date(`${ymd}T12:00:00`).getDay(); // meio-dia: seguro pra ler o dia da semana
+  const dayStart = startOfDayBrazil(ymd);
+  const dayEnd = endOfDayBrazil(ymd);
 
   // tenantId é opcional na assinatura (chamadas internas já confiam no professionalId),
   // mas sempre que disponível (ex.: vindo de uma API key do N8N) deve ser passado -
@@ -44,11 +54,11 @@ export async function getFreeWindows(
   const baseWindows: TimeWindow[] = availabilitySlots.map((slot) => {
     const [startH, startM] = slot.startTime.split(":").map(Number);
     const [endH, endM] = slot.endTime.split(":").map(Number);
-    const start = new Date(date);
-    start.setHours(startH, startM, 0, 0);
-    const end = new Date(date);
-    end.setHours(endH, endM, 0, 0);
-    return { start, end };
+    // "08:00" no cadastro significa 08:00 no Brasil, não no fuso do servidor
+    return {
+      start: brazilWallClockToUtc(ymd, startH, startM),
+      end: brazilWallClockToUtc(ymd, endH, endM),
+    };
   });
 
   // Tudo que ocupa tempo (bloqueios + agendamentos já feitos) vira um intervalo "ocupado"
@@ -93,8 +103,9 @@ export async function getAvailableStartTimes(
 
   // Passo de sugestão (de quanto em quanto tempo oferecer um horário) - usa o
   // menor `stepMinutes` configurado pro profissional naquele dia, com 15min de padrão.
+  const weekdayBr = new Date(`${dateToYmdBrazil(date)}T12:00:00`).getDay();
   const availabilitySlots = await prisma.availabilitySlot.findMany({
-    where: { professionalId, weekday: date.getDay() },
+    where: { professionalId, weekday: weekdayBr },
   });
   const stepMin = availabilitySlots.length
     ? Math.min(...availabilitySlots.map((s) => s.stepMinutes))
@@ -169,8 +180,9 @@ export async function checkSlot(
   }
 
   // Não cabe. Descobrir se é por causa do expediente ou de algo ocupando o horário.
-  const dayStart = startOfDay(start);
-  const dayEnd = endOfDay(start);
+  const ymd = dateToYmdBrazil(start);
+  const dayStart = startOfDayBrazil(ymd);
+  const dayEnd = endOfDayBrazil(ymd);
   const [blocks, appointments] = await Promise.all([
     prisma.scheduleBlock.findMany({
       where: { professionalId, startAt: { lt: end }, endAt: { gt: start } },
