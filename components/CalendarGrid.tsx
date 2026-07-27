@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { format, isSameDay } from "date-fns";
+import { format } from "date-fns";
+import { dateToYmdBrazil, timeHHmmBrazil } from "@/lib/timezone";
+
+/** Minutos desde a meia-noite brasileira, a partir de um instante (ISO ou Date). */
+function brMinutesOfDay(d: Date): number {
+  const [h, m] = timeHHmmBrazil(d).split(":").map(Number);
+  return h * 60 + m;
+}
 
 export interface CalendarAppointment {
   id: string;
@@ -87,13 +94,15 @@ export function CalendarGrid({
   const totalSlots = ((endHour - startHour) * 60) / slotMinutes;
   const hourLines = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i);
 
+  // Comparação de dias sempre pela DATA BRASILEIRA, nunca pelo fuso do navegador.
+  const columnYmds = columnDates.map(dateToYmdBrazil);
+
   // Na visão de um dia só (colunas = profissionais) todas as datas são iguais;
   // aí não faz sentido tingir "a coluna de hoje", seria o calendário inteiro.
-  const hasMultipleDays = columnDates.some((d) => !isSameDay(d, columnDates[0]));
+  const hasMultipleDays = columnYmds.some((ymd) => ymd !== columnYmds[0]);
 
   function slotIndexFor(iso: string) {
-    const d = new Date(iso);
-    const minutesFromStart = (d.getHours() - startHour) * 60 + d.getMinutes();
+    const minutesFromStart = brMinutesOfDay(new Date(iso)) - startHour * 60;
     return Math.round(minutesFromStart / slotMinutes);
   }
 
@@ -114,11 +123,12 @@ export function CalendarGrid({
   }
 
   // Posição (em px) da linha do horário atual, ou null se hoje não está visível
+  const nowYmd = now ? dateToYmdBrazil(now) : null;
   const nowOffsetPx = (() => {
-    if (!now) return null;
-    const visible = columnDates.some((d) => isSameDay(d, now));
+    if (!now || !nowYmd) return null;
+    const visible = columnYmds.includes(nowYmd);
     if (!visible) return null;
-    const minutesFromStart = (now.getHours() - startHour) * 60 + now.getMinutes();
+    const minutesFromStart = brMinutesOfDay(now) - startHour * 60;
     if (minutesFromStart < 0 || minutesFromStart > (endHour - startHour) * 60) return null;
     return (minutesFromStart / slotMinutes) * ROW_HEIGHT;
   })();
@@ -134,7 +144,7 @@ export function CalendarGrid({
       <div className="grid" style={{ gridTemplateColumns: gridCols, borderBottom: "1px solid var(--line)" }}>
         <div />
         {columns.map((col, colIdx) => {
-          const columnIsToday = !!now && isSameDay(columnDates[colIdx], now);
+          const columnIsToday = !!nowYmd && columnYmds[colIdx] === nowYmd;
           const highlight = columnIsToday && hasMultipleDays;
           return (
             <div
@@ -204,7 +214,7 @@ export function CalendarGrid({
         {/* Fundo levemente destacado na coluna de hoje (só na visão semanal) */}
         {hasMultipleDays &&
           columns.map((col, colIdx) =>
-            now && isSameDay(columnDates[colIdx], now) ? (
+            nowYmd && columnYmds[colIdx] === nowYmd ? (
               <div
                 key={`today-bg-${col.id}`}
                 className="pointer-events-none"
@@ -320,7 +330,7 @@ export function CalendarGrid({
               className="text-[10px] font-semibold px-1 rounded"
               style={{ background: "var(--amber)", color: "#fff", marginLeft: 2 }}
             >
-              {format(now, "HH:mm")}
+              {timeHHmmBrazil(now)}
             </span>
             <span className="flex-1 h-px" style={{ background: "var(--amber)" }} />
           </div>
