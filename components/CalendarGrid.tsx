@@ -63,6 +63,68 @@ export function computeHourRange(ranges: WorkingRange[], fallback = { start: 8, 
   return { start: Math.floor(minStart / 60), end: Math.ceil(maxEnd / 60) };
 }
 
+interface Lane {
+  lane: number; // posição da faixa (0 = mais à esquerda)
+  lanes: number; // quantas faixas o grupo sobreposto tem no total
+}
+
+/**
+ * Resolve sobreposições: quando dois ou mais agendamentos ocupam o mesmo
+ * intervalo dentro da MESMA coluna (ex: dois profissionais às 10h no mesmo dia,
+ * na visão semanal), eles precisam dividir a largura em vez de um cobrir o outro.
+ *
+ * Como funciona:
+ * 1. Ordena por horário de início.
+ * 2. Agrupa em "clusters" - conjuntos que se sobrepõem em cadeia.
+ * 3. Dentro de cada cluster, encaixa cada agendamento na primeira faixa livre.
+ *
+ * O resultado é o mesmo comportamento de apps de agenda: dois compromissos
+ * simultâneos ficam lado a lado, com metade da largura cada.
+ */
+function assignLanes(appointments: CalendarAppointment[]): Map<string, Lane> {
+  const result = new Map<string, Lane>();
+  const ms = (iso: string) => new Date(iso).getTime();
+
+  const sorted = [...appointments].sort(
+    (a, b) => ms(a.startAt) - ms(b.startAt) || ms(b.endAt) - ms(a.endAt)
+  );
+
+  let cluster: CalendarAppointment[] = [];
+  let clusterEnd = -Infinity;
+
+  const flushCluster = () => {
+    if (!cluster.length) return;
+    const laneEnds: number[] = []; // quando cada faixa fica livre
+    const assigned: Array<{ id: string; lane: number }> = [];
+
+    for (const a of cluster) {
+      let lane = laneEnds.findIndex((end) => end <= ms(a.startAt));
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(0);
+      }
+      laneEnds[lane] = ms(a.endAt);
+      assigned.push({ id: a.id, lane });
+    }
+
+    for (const { id, lane } of assigned) {
+      result.set(id, { lane, lanes: laneEnds.length });
+    }
+    cluster = [];
+    clusterEnd = -Infinity;
+  };
+
+  for (const a of sorted) {
+    // Se este começa depois do fim de todo o cluster atual, o cluster fechou
+    if (cluster.length && ms(a.startAt) >= clusterEnd) flushCluster();
+    cluster.push(a);
+    clusterEnd = Math.max(clusterEnd, ms(a.endAt));
+  }
+  flushCluster();
+
+  return result;
+}
+
 export function CalendarGrid({
   startHour = 7,
   endHour = 20,
@@ -288,37 +350,54 @@ export function CalendarGrid({
           />
         ))}
 
-        {/* Agendamentos */}
-        {columns.map((col, colIdx) =>
-          col.appointments.map((a) => {
+        {/* Agendamentos - divididos em faixas quando há sobreposição */}
+        {columns.map((col, colIdx) => {
+          const lanes = assignLanes(col.appointments);
+          return col.appointments.map((a) => {
             const start = slotIndexFor(a.startAt);
             const end = Math.max(slotIndexFor(a.endAt), start + 1);
             const style = STATUS_STYLE[a.status] ?? STATUS_STYLE.SCHEDULED;
+            const { lane, lanes: laneCount } = lanes.get(a.id) ?? { lane: 0, lanes: 1 };
+
+            // Divide a largura da coluna entre os simultâneos. As porcentagens são
+            // relativas à célula da grade, então funcionam em qualquer largura de tela.
+            const widthPct = 100 / laneCount;
+            const isNarrow = laneCount >= 3;
+
             return (
               <button
                 key={a.id}
                 type="button"
                 onClick={() => onAppointmentClick?.(a, col.id)}
-                className="rounded-md px-2 py-1 overflow-hidden mx-1 my-px text-left"
+                className="rounded-md py-1 overflow-hidden my-px text-left"
                 style={{
                   gridColumn: colIdx + 2,
                   gridRow: `${start + 1} / ${end + 1}`,
+                  width: `calc(${widthPct}% - 4px)`,
+                  marginLeft: `calc(${lane * widthPct}% + 2px)`,
+                  paddingLeft: isNarrow ? 3 : 6,
+                  paddingRight: isNarrow ? 2 : 6,
                   background: style.bg,
                   borderLeft: `3px solid ${a.accentColor ?? style.border}`,
                   cursor: onAppointmentClick ? "pointer" : "default",
+                  zIndex: 5,
                 }}
                 title={`${a.patientName}${a.sublabel ? ` · ${a.sublabel}` : ""} · ${format(new Date(a.startAt), "HH:mm")}–${format(new Date(a.endAt), "HH:mm")}`}
               >
                 <p className="text-xs font-medium truncate leading-tight" style={{ color: "var(--ink)" }}>
                   {a.patientName}
                 </p>
-                <p className="text-[10px] truncate leading-tight" style={{ color: "var(--ink-soft)" }}>
-                  {a.sublabel ?? format(new Date(a.startAt), "HH:mm")}
-                </p>
+                {/* Com 3+ simultâneos não cabe a segunda linha - o nome do
+                    profissional segue visível no tooltip e na cor da borda */}
+                {!isNarrow && (
+                  <p className="text-[10px] truncate leading-tight" style={{ color: "var(--ink-soft)" }}>
+                    {a.sublabel ?? format(new Date(a.startAt), "HH:mm")}
+                  </p>
+                )}
               </button>
             );
-          })
-        )}
+          });
+        })}
 
         {/* Linha do horário atual - fica por cima de tudo */}
         {nowOffsetPx !== null && now && (
