@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { CalendarGrid, CalendarColumn, CalendarAppointment } from "@/components/CalendarGrid";
 import { QuickCreateModal, AppointmentDetailModal, ServiceOption } from "@/components/AppointmentModals";
 
+/** Monta a data no fuso local do navegador a partir de "yyyy-MM-dd". */
+function parseLocalDate(yyyyMmDd: string) {
+  const [y, m, d] = yyyyMmDd.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function GroupCalendarClient({
   date,
   columns,
@@ -12,7 +18,7 @@ export function GroupCalendarClient({
   professionalLabel,
   patientLabel,
 }: {
-  date: string; // ISO
+  date: string; // "yyyy-MM-dd"
   columns: CalendarColumn[];
   servicesByProfessional: Record<string, ServiceOption[]>;
   professionalLabel: string;
@@ -34,7 +40,7 @@ export function GroupCalendarClient({
     <>
       <CalendarGrid
         columns={columns}
-        columnDates={columns.map(() => new Date(date))}
+        columnDates={columns.map(() => parseLocalDate(date))}
         onSlotClick={(professionalId, start) => setNewSlot({ professionalId, start })}
         onAppointmentClick={(appointment) => setSelected(appointment)}
       />
