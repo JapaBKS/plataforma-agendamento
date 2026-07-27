@@ -69,6 +69,21 @@ export async function POST(req: NextRequest) {
   const start = new Date(startAt);
   const end = new Date(start.getTime() + durationMin * 60000);
 
+  // Não permite agendar para trás. A tela do calendário já bloqueia o clique,
+  // mas a validação de verdade tem que estar aqui - a API é chamada direto
+  // pelo N8N e por qualquer requisição.
+  //
+  // TOLERANCIA_MIN existe pro caso de "encaixe" na recepção: o cliente chegou
+  // 14:00, já são 14:05 e a secretária quer registrar. Aumente esse número se
+  // quiser dar mais folga, ou zere pra proibir estritamente.
+  const TOLERANCIA_MIN = 5;
+  if (start.getTime() < Date.now() - TOLERANCIA_MIN * 60_000) {
+    return NextResponse.json(
+      { error: "Não é possível agendar em um horário que já passou." },
+      { status: 400 }
+    );
+  }
+
   // Revalida disponibilidade no momento da criação para evitar conflitos de horário
   const isFree = await isStartTimeAvailable(professionalId, start, durationMin, tenantId);
   if (!isFree) {
