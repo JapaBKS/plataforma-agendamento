@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantFromApiKey } from "@/lib/apiKeyAuth";
 import { getAvailableStartTimes } from "@/lib/availability";
+import { brazilWallClockToUtc } from "@/lib/timezone";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -29,7 +30,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const date = new Date(`${dateParam}T00:00:00`);
+  // "2026-07-27" significa o dia 27 no Brasil; usamos meio-dia pra representar
+  // o dia com folga em qualquer fuso, e o motor extrai a data brasileira dali.
+  const date = brazilWallClockToUtc(dateParam, 12, 0);
   if (isNaN(date.getTime())) {
     return NextResponse.json({ error: "Data inválida" }, { status: 400 });
   }
