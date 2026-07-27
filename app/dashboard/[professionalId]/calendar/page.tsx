@@ -3,9 +3,18 @@ import { redirect, notFound } from "next/navigation";
 import { auth, canAccessProfessional } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getLabels } from "@/lib/labels";
-import { startOfDay, endOfDay, addDays, subDays, format } from "date-fns";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { DatePicker } from "../../calendar/DatePicker";
 import { ProfessionalCalendarClient } from "./ProfessionalCalendarClient";
+import { todayInBrazil, startOfDayBrazil, endOfDayBrazil, dateToYmdBrazil } from "@/lib/timezone";
+
+/** Soma/subtrai dias de uma data "yyyy-MM-dd" sem passar por fuso. */
+function shiftYmd(ymd: string, deltaDays: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + deltaDays, 12); // meio-dia: seguro
+  return format(dt, "yyyy-MM-dd");
+}
 
 export default async function ProfessionalCalendarPage({
   params,
@@ -32,11 +41,16 @@ export default async function ProfessionalCalendarPage({
 
   const labels = getLabels(professional.tenant.businessType, professional.tenant.customLabels);
 
+  // Data trabalhada como "yyyy-MM-dd" (sem fuso); limites do dia calculados no Brasil.
   const { date: dateParam } = await searchParams;
-  const date = dateParam ? new Date(`${dateParam}T00:00:00`) : new Date();
-  const dayStart = startOfDay(date);
-  const dayEnd = endOfDay(date);
-  const dateValue = format(date, "yyyy-MM-dd");
+  const dateYmd = dateParam ?? todayInBrazil();
+  const dayStart = startOfDayBrazil(dateYmd);
+  const dayEnd = endOfDayBrazil(dateYmd);
+
+  // Data ao meio-dia só pra formatar rótulos e descobrir o dia da semana
+  const [dy, dm, dd] = dateYmd.split("-").map(Number);
+  const labelDate = new Date(dy, dm - 1, dd, 12);
+  const weekday = labelDate.getDay();
 
   const [appointments, professionalServices, availability] = await Promise.all([
     prisma.appointment.findMany({
@@ -47,10 +61,7 @@ export default async function ProfessionalCalendarPage({
       where: { professionalId, service: { active: true } },
       include: { service: true },
     }),
-    // Grade de trabalho do dia da semana correspondente
-    prisma.availabilitySlot.findMany({
-      where: { professionalId, weekday: date.getDay() },
-    }),
+    prisma.availabilitySlot.findMany({ where: { professionalId, weekday } }),
   ]);
 
   const workingRanges = availability.map((slot) => ({ start: slot.startTime, end: slot.endTime }));
@@ -78,6 +89,9 @@ export default async function ProfessionalCalendarPage({
     price: link.price ?? link.service.price,
   }));
 
+  const prevDay = shiftYmd(dateYmd, -1);
+  const nextDay = shiftYmd(dateYmd, 1);
+
   return (
     <main className="flex-1 px-6 py-8 max-w-3xl mx-auto w-full" style={{ background: "var(--surface)" }}>
       <Link href={`/dashboard/${professionalId}`} className="text-sm mb-4 inline-block" style={{ color: "var(--teal)" }}>
@@ -90,15 +104,15 @@ export default async function ProfessionalCalendarPage({
         </h1>
         <div className="flex items-center gap-2">
           <Link
-            href={`/dashboard/${professionalId}/calendar?date=${format(subDays(date, 1), "yyyy-MM-dd")}`}
+            href={`/dashboard/${professionalId}/calendar?date=${prevDay}`}
             className="px-3 py-2 rounded-lg text-sm"
             style={{ background: "var(--surface-card)", color: "var(--ink)", border: "1px solid var(--line)" }}
           >
             ← Anterior
           </Link>
-          <DatePicker defaultValue={dateValue} />
+          <DatePicker defaultValue={dateYmd} />
           <Link
-            href={`/dashboard/${professionalId}/calendar?date=${format(addDays(date, 1), "yyyy-MM-dd")}`}
+            href={`/dashboard/${professionalId}/calendar?date=${nextDay}`}
             className="px-3 py-2 rounded-lg text-sm"
             style={{ background: "var(--surface-card)", color: "var(--ink)", border: "1px solid var(--line)" }}
           >
@@ -107,13 +121,13 @@ export default async function ProfessionalCalendarPage({
         </div>
       </div>
 
-      <p className="text-sm mb-4" style={{ color: "var(--ink-soft)" }}>
-        {format(date, "dd/MM/yyyy")}
+      <p className="text-sm mb-4 capitalize" style={{ color: "var(--ink-soft)" }}>
+        {format(labelDate, "EEEE, dd/MM/yyyy", { locale: ptBR })}
         {workingRanges.length === 0 && " · sem expediente cadastrado neste dia"}
       </p>
 
       <ProfessionalCalendarClient
-        date={dateValue}
+        date={dateYmd}
         professionalId={professionalId}
         professionalLabel={professional.user.name}
         columns={columns}
