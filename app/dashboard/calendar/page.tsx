@@ -3,9 +3,17 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getLabels } from "@/lib/labels";
-import { startOfDay, endOfDay, addDays, subDays, format } from "date-fns";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { DatePicker } from "./DatePicker";
 import { GroupCalendarClient } from "./GroupCalendarClient";
+import { todayInBrazil, startOfDayBrazil, endOfDayBrazil } from "@/lib/timezone";
+
+/** Soma/subtrai dias de uma data "yyyy-MM-dd" sem passar por fuso. */
+function shiftYmd(ymd: string, deltaDays: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return format(new Date(y, m - 1, d + deltaDays, 12), "yyyy-MM-dd");
+}
 
 export default async function CalendarPage({
   searchParams,
@@ -20,10 +28,11 @@ export default async function CalendarPage({
   if (user.role === "SUPER_ADMIN") redirect("/admin");
 
   const { date: dateParam } = await searchParams;
-  const date = dateParam ? new Date(`${dateParam}T00:00:00`) : new Date();
-  const dayStart = startOfDay(date);
-  const dayEnd = endOfDay(date);
-  const dateValue = format(date, "yyyy-MM-dd");
+  const dateYmd = dateParam ?? todayInBrazil();
+  const dayStart = startOfDayBrazil(dateYmd);
+  const dayEnd = endOfDayBrazil(dateYmd);
+  const [ly, lm, ld] = dateYmd.split("-").map(Number);
+  const labelDate = new Date(ly, lm - 1, ld, 12);
 
   const [professionals, tenant] = await Promise.all([
     prisma.professional.findMany({
@@ -80,15 +89,15 @@ export default async function CalendarPage({
         </h1>
         <div className="flex items-center gap-2">
           <Link
-            href={`/dashboard/calendar?date=${format(subDays(date, 1), "yyyy-MM-dd")}`}
+            href={`/dashboard/calendar?date=${shiftYmd(dateYmd, -1)}`}
             className="px-3 py-2 rounded-lg text-sm"
             style={{ background: "var(--surface-card)", color: "var(--ink)", border: "1px solid var(--line)" }}
           >
             ← Anterior
           </Link>
-          <DatePicker defaultValue={dateValue} />
+          <DatePicker defaultValue={dateYmd} />
           <Link
-            href={`/dashboard/calendar?date=${format(addDays(date, 1), "yyyy-MM-dd")}`}
+            href={`/dashboard/calendar?date=${shiftYmd(dateYmd, 1)}`}
             className="px-3 py-2 rounded-lg text-sm"
             style={{ background: "var(--surface-card)", color: "var(--ink)", border: "1px solid var(--line)" }}
           >
@@ -97,8 +106,8 @@ export default async function CalendarPage({
         </div>
       </div>
 
-      <p className="text-sm mb-4" style={{ color: "var(--ink-soft)" }}>
-        {format(date, "EEEE, dd/MM/yyyy")}
+      <p className="text-sm mb-4 capitalize" style={{ color: "var(--ink-soft)" }}>
+        {format(labelDate, "EEEE, dd/MM/yyyy", { locale: ptBR })}
       </p>
 
       {columns.length === 0 ? (
@@ -107,7 +116,7 @@ export default async function CalendarPage({
         </p>
       ) : (
         <GroupCalendarClient
-          date={date.toISOString()}
+          date={dateYmd}
           columns={columns}
           servicesByProfessional={servicesByProfessional}
           professionalLabel={labels.professional}
