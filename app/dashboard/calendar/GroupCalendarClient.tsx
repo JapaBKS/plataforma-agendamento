@@ -58,7 +58,14 @@ export function GroupCalendarClient({
       )}
 
       {selected && (
-        <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)} onChanged={refresh} />
+        <AppointmentDetailModal
+          appointment={selected}
+          professionals={columns.map((c) => ({ id: c.id, name: c.label }))}
+          servicesByProfessional={servicesByProfessional}
+          patientLabel={patientLabel}
+          onClose={() => setSelected(null)}
+          onChanged={refresh}
+        />
       )}
     </>
   );
