@@ -26,6 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { searchParams } = new URL(req.url);
   const serviceId = searchParams.get("serviceId");
   const startAt = searchParams.get("startAt");
+  const excludeId = searchParams.get("excludeAppointmentId") ?? undefined;
   if (!serviceId || !startAt) {
     return NextResponse.json({ error: "Parâmetros 'serviceId' e 'startAt' são obrigatórios" }, { status: 400 });
   }
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const durationMin = link.durationMin ?? link.service.defaultDurationMin;
-  const result = await checkSlot(professionalId, start, durationMin, professional.tenantId);
+  const result = await checkSlot(professionalId, start, durationMin, professional.tenantId, excludeId);
 
   return NextResponse.json({ ...result, durationMin });
 }
