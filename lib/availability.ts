@@ -23,7 +23,13 @@ export interface TimeWindow {
 export async function getFreeWindows(
   professionalId: string,
   date: Date,
-  tenantId?: string
+  tenantId?: string,
+  /**
+   * Ignora um agendamento no cálculo. Essencial ao REAGENDAR: sem isso o
+   * agendamento entraria em conflito consigo mesmo e nunca poderia ser movido
+   * (nem pra 10 minutos depois, nem pra outro dia).
+   */
+  excludeAppointmentId?: string
 ): Promise<TimeWindow[]> {
   // TUDO calculado no fuso do Brasil. Sem isso, num servidor UTC (Vercel) o
   // expediente "08:00-18:00" viraria 08:00-18:00 UTC = 05:00-15:00 no Brasil,
@@ -46,7 +52,12 @@ export async function getFreeWindows(
       where: { professionalId, startAt: { lte: dayEnd }, endAt: { gte: dayStart } },
     }),
     prisma.appointment.findMany({
-      where: { professionalId, startAt: { gte: dayStart, lte: dayEnd }, status: { not: "CANCELLED" } },
+      where: {
+        professionalId,
+        startAt: { gte: dayStart, lte: dayEnd },
+        status: { not: "CANCELLED" },
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
+      },
     }),
   ]);
 
@@ -97,9 +108,10 @@ export async function getAvailableStartTimes(
   professionalId: string,
   date: Date,
   durationMin: number,
-  tenantId?: string
+  tenantId?: string,
+  excludeAppointmentId?: string
 ): Promise<Date[]> {
-  const windows = await getFreeWindows(professionalId, date, tenantId);
+  const windows = await getFreeWindows(professionalId, date, tenantId, excludeAppointmentId);
 
   // Passo de sugestão (de quanto em quanto tempo oferecer um horário) - usa o
   // menor `stepMinutes` configurado pro profissional naquele dia, com 15min de padrão.
@@ -164,7 +176,8 @@ export async function checkSlot(
   professionalId: string,
   start: Date,
   durationMin: number,
-  tenantId?: string
+  tenantId?: string,
+  excludeAppointmentId?: string
 ): Promise<SlotCheck> {
   const end = addMinutes(start, durationMin);
 
@@ -174,7 +187,7 @@ export async function checkSlot(
   }
 
   // Cabe dentro de alguma janela livre? Então está tudo certo.
-  const windows = await getFreeWindows(professionalId, start, tenantId);
+  const windows = await getFreeWindows(professionalId, start, tenantId, excludeAppointmentId);
   if (windows.some((w) => start >= w.start && end <= w.end)) {
     return { ok: true, issue: null };
   }
@@ -193,6 +206,7 @@ export async function checkSlot(
         status: { not: "CANCELLED" },
         startAt: { lt: end, gte: dayStart },
         endAt: { gt: start, lte: addMinutes(dayEnd, 1) },
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
     }),
   ]);
