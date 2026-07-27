@@ -128,3 +128,67 @@ export async function isStartTimeAvailable(
   const end = addMinutes(start, durationMin);
   return windows.some((w) => start >= w.start && end <= w.end);
 }
+
+export type SlotIssue = "past" | "conflict" | "outside_hours" | null;
+
+export interface SlotCheck {
+  ok: boolean;
+  /**
+   * Por que não dá:
+   * - "past"          -> horário já passou (nunca liberado)
+   * - "conflict"      -> choca com outro agendamento ou bloqueio (nunca liberado:
+   *                      seria agenda dupla)
+   * - "outside_hours" -> fora do expediente cadastrado, mas SEM conflito. Pode ser
+   *                      liberado com confirmação explícita (atendimento de exceção).
+   */
+  issue: SlotIssue;
+}
+
+/**
+ * Verifica um horário específico e diz QUAL é o problema, não só que existe um.
+ * A distinção importa porque "fora do expediente" é uma exceção legítima que a
+ * recepção pode querer forçar, enquanto "conflito" é sempre um erro.
+ */
+export async function checkSlot(
+  professionalId: string,
+  start: Date,
+  durationMin: number,
+  tenantId?: string
+): Promise<SlotCheck> {
+  const end = addMinutes(start, durationMin);
+
+  const TOLERANCIA_MIN = 5;
+  if (start.getTime() < Date.now() - TOLERANCIA_MIN * 60_000) {
+    return { ok: false, issue: "past" };
+  }
+
+  // Cabe dentro de alguma janela livre? Então está tudo certo.
+  const windows = await getFreeWindows(professionalId, start, tenantId);
+  if (windows.some((w) => start >= w.start && end <= w.end)) {
+    return { ok: true, issue: null };
+  }
+
+  // Não cabe. Descobrir se é por causa do expediente ou de algo ocupando o horário.
+  const dayStart = startOfDay(start);
+  const dayEnd = endOfDay(start);
+  const [blocks, appointments] = await Promise.all([
+    prisma.scheduleBlock.findMany({
+      where: { professionalId, startAt: { lt: end }, endAt: { gt: start } },
+    }),
+    prisma.appointment.findMany({
+      where: {
+        professionalId,
+        status: { not: "CANCELLED" },
+        startAt: { lt: end, gte: dayStart },
+        endAt: { gt: start, lte: addMinutes(dayEnd, 1) },
+      },
+    }),
+  ]);
+
+  if (blocks.length > 0 || appointments.length > 0) {
+    return { ok: false, issue: "conflict" };
+  }
+
+  // Nada ocupando: o impedimento é a grade de trabalho
+  return { ok: false, issue: "outside_hours" };
+}
