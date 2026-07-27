@@ -467,14 +467,14 @@ export function AppointmentDetailModal({
             )}
           </div>
 
-          {/* Mudança de status */}
+          {/* Mudança de status.
+              CONFIRMED continua existindo no banco e na API, mas não tem botão:
+              marcar "confirmado" na mão não muda nada no dia a dia. Esse status
+              é pra ser preenchido AUTOMATICAMENTE pelo N8N quando o cliente
+              responder ao lembrete - aí ele passa a ter utilidade real (saber
+              quem não respondeu). */}
           {isOpen && (
             <div className="flex gap-2 mb-3 flex-wrap">
-              {status === "SCHEDULED" && (
-                <ActionButton onClick={() => updateStatus("CONFIRMED")} disabled={loading} color="var(--teal-deep)">
-                  Confirmar
-                </ActionButton>
-              )}
               <ActionButton onClick={() => updateStatus("COMPLETED")} disabled={loading} color="var(--sage)">
                 Concluir
               </ActionButton>
