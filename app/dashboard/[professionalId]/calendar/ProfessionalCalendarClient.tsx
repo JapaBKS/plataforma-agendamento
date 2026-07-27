@@ -76,7 +76,14 @@ export function ProfessionalCalendarClient({
       )}
 
       {selected && (
-        <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)} onChanged={refresh} />
+        <AppointmentDetailModal
+          appointment={selected}
+          professionals={[{ id: professionalId, name: professionalLabel }]}
+          servicesByProfessional={{ [professionalId]: services }}
+          patientLabel={patientLabel}
+          onClose={() => setSelected(null)}
+          onChanged={refresh}
+        />
       )}
     </>
   );
