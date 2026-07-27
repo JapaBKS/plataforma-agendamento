@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth, canAccessProfessional } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isStartTimeAvailable } from "@/lib/availability";
+import { checkSlot } from "@/lib/availability";
 
 /**
  * GET /api/appointments?professionalId=xxx&from=...&to=...
@@ -69,6 +69,10 @@ const createSchema = z.object({
   patientEmail: z.string().email().optional(),
   startAt: z.string().datetime(),
   notes: z.string().optional(),
+  // Permite registrar um atendimento FORA do expediente cadastrado (exceção
+  // legítima: encaixe, plantão, profissional que atende sob demanda).
+  // Nunca libera conflito com outro agendamento - isso seria agenda dupla.
+  allowOutsideHours: z.boolean().optional(),
 });
 
 /**
@@ -92,7 +96,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { professionalId, serviceId, patientName, patientPhone, patientEmail, startAt, notes } = parsed.data;
+  const { professionalId, serviceId, patientName, patientPhone, patientEmail, startAt, notes, allowOutsideHours } =
+    parsed.data;
 
   const professional = await prisma.professional.findUnique({ where: { id: professionalId } });
   if (!professional || !canAccessProfessional(user, professional.tenantId, professionalId)) {
@@ -112,24 +117,30 @@ export async function POST(req: NextRequest) {
   const start = new Date(startAt);
   const end = new Date(start.getTime() + durationMin * 60000);
 
-  // Não permite agendar para trás. A tela do calendário já bloqueia o clique,
-  // mas a validação de verdade tem que estar aqui - a API é chamada direto
-  // pelo N8N e por qualquer requisição.
-  //
-  // TOLERANCIA_MIN existe pro caso de "encaixe" na recepção: o cliente chegou
-  // 14:00, já são 14:05 e a secretária quer registrar. Aumente esse número se
-  // quiser dar mais folga, ou zere pra proibir estritamente.
-  const TOLERANCIA_MIN = 5;
-  if (start.getTime() < Date.now() - TOLERANCIA_MIN * 60_000) {
-    return NextResponse.json(
-      { error: "Não é possível agendar em um horário que já passou." },
-      { status: 400 }
-    );
-  }
+  // Uma verificação só, que diz QUAL é o problema - permite tratar
+  // "fora do expediente" (exceção liberável) diferente de "conflito" (erro).
+  const check = await checkSlot(professionalId, start, durationMin, professional.tenantId);
 
-  const isFree = await isStartTimeAvailable(professionalId, start, durationMin, professional.tenantId);
-  if (!isFree) {
-    return NextResponse.json({ error: "Horário não disponível" }, { status: 409 });
+  if (!check.ok) {
+    if (check.issue === "past") {
+      return NextResponse.json(
+        { error: "Não é possível agendar em um horário que já passou.", issue: "past" },
+        { status: 400 }
+      );
+    }
+    if (check.issue === "conflict") {
+      return NextResponse.json(
+        { error: "Esse horário conflita com outro agendamento ou bloqueio.", issue: "conflict" },
+        { status: 409 }
+      );
+    }
+    // outside_hours: só passa com confirmação explícita de quem está agendando
+    if (check.issue === "outside_hours" && !allowOutsideHours) {
+      return NextResponse.json(
+        { error: "Horário fora do expediente cadastrado.", issue: "outside_hours" },
+        { status: 409 }
+      );
+    }
   }
 
   const appointment = await prisma.appointment.create({
