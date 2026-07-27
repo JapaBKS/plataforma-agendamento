@@ -2,13 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarGrid, CalendarColumn, CalendarAppointment, WorkingRange, computeHourRange } from "@/components/CalendarGrid";
+import {
+  CalendarGrid,
+  CalendarColumn,
+  CalendarAppointment,
+  WorkingRange,
+  computeHourRange,
+} from "@/components/CalendarGrid";
 import { QuickCreateModal, AppointmentDetailModal, ServiceOption } from "@/components/AppointmentModals";
 
 /**
  * Monta a data no fuso LOCAL do navegador a partir de "yyyy-MM-dd".
- * Usar `new Date("2026-07-27T00:00:00.000Z")` daria o dia anterior no Brasil,
- * porque o ISO com "Z" é meia-noite UTC (= 21h do dia anterior aqui).
+ * Usar `new Date("...Z")` daria o dia anterior no Brasil (meia-noite UTC = 21h daqui).
  */
 function parseLocalDate(yyyyMmDd: string) {
   const [y, m, d] = yyyyMmDd.split("-").map(Number);
@@ -42,6 +47,7 @@ export function ProfessionalCalendarClient({
     router.refresh();
   }
 
+  // Mostra só a faixa de horas do expediente (com 1h de folga de cada lado)
   const range = computeHourRange(workingRanges);
   const startHour = Math.max(0, range.start - 1);
   const endHour = Math.min(24, range.end + 1);
