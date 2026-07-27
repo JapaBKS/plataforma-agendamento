@@ -64,7 +64,14 @@ export function WeekCalendarClient({
       )}
 
       {selected && (
-        <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)} onChanged={refresh} />
+        <AppointmentDetailModal
+          appointment={selected}
+          professionals={professionals}
+          servicesByProfessional={servicesByProfessional}
+          patientLabel={patientLabel}
+          onClose={() => setSelected(null)}
+          onChanged={refresh}
+        />
       )}
     </>
   );
