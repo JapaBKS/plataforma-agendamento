@@ -100,11 +100,17 @@ export async function getAvailableStartTimes(
     ? Math.min(...availabilitySlots.map((s) => s.stepMinutes))
     : 15;
 
+  // Não oferece horário que já passou - senão o chatbot sugeriria "09:00" às 15h.
+  // A mesma tolerância usada na criação do agendamento, pra não haver o caso
+  // esquisito de um horário aparecer na lista e ser recusado ao confirmar.
+  const TOLERANCIA_MIN = 5;
+  const minStart = Date.now() - TOLERANCIA_MIN * 60_000;
+
   const starts: Date[] = [];
   for (const w of windows) {
     let cursor = w.start;
     while (addMinutes(cursor, durationMin) <= w.end) {
-      starts.push(cursor);
+      if (cursor.getTime() >= minStart) starts.push(cursor);
       cursor = addMinutes(cursor, stepMin);
     }
   }
