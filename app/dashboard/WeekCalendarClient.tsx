@@ -10,6 +10,16 @@ import {
   ProfessionalOption,
 } from "@/components/AppointmentModals";
 
+/**
+ * Monta a data no fuso LOCAL do navegador a partir de "yyyy-MM-dd".
+ * Usar `new Date("2026-07-28T00:00:00.000Z")` daria o dia anterior no Brasil,
+ * porque o ISO com "Z" é meia-noite UTC (= 21h do dia anterior aqui).
+ */
+function parseLocalDate(yyyyMmDd: string) {
+  const [y, m, d] = yyyyMmDd.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function WeekCalendarClient({
   columns,
   columnDates,
@@ -18,7 +28,7 @@ export function WeekCalendarClient({
   patientLabel,
 }: {
   columns: CalendarColumn[];
-  columnDates: string[]; // ISO
+  columnDates: string[]; // "yyyy-MM-dd" - montado como data local no navegador
   professionals: ProfessionalOption[];
   servicesByProfessional: Record<string, ServiceOption[]>;
   patientLabel: string;
@@ -37,7 +47,7 @@ export function WeekCalendarClient({
     <>
       <CalendarGrid
         columns={columns}
-        columnDates={columnDates.map((d) => new Date(d))}
+        columnDates={columnDates.map(parseLocalDate)}
         onSlotClick={(_, start) => setNewSlotStart(start)}
         onAppointmentClick={(appointment) => setSelected(appointment)}
       />
