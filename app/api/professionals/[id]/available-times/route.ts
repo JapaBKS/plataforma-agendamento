@@ -25,6 +25,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { searchParams } = new URL(req.url);
   const serviceId = searchParams.get("serviceId");
   const dateParam = searchParams.get("date");
+  // Ao reagendar, ignora o próprio agendamento pra ele não conflitar consigo mesmo
+  const excludeId = searchParams.get("excludeAppointmentId") ?? undefined;
   if (!serviceId || !dateParam) {
     return NextResponse.json({ error: "Parâmetros 'serviceId' e 'date' são obrigatórios" }, { status: 400 });
   }
@@ -46,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const durationMin = link.durationMin ?? link.service.defaultDurationMin;
   const price = link.price ?? link.service.price;
 
-  const starts = await getAvailableStartTimes(professionalId, date, durationMin, professional.tenantId);
+  const starts = await getAvailableStartTimes(professionalId, date, durationMin, professional.tenantId, excludeId);
 
   return NextResponse.json({
     durationMin,
